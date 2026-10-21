@@ -1,5 +1,5 @@
 const MACHINE_IDS = ["31613", "31994", "32027", "393"];
-const views = ["home-view", "machine-list-view", "machine-view", "loyalty-view", "review-view"];
+const views = ["home-view", "machine-list-view", "machine-view", "loyalty-view", "loyalty-success-view", "review-view"];
 let selectedMachine = null;
 
 const $ = (id) => document.getElementById(id);
@@ -52,6 +52,34 @@ $("loyalty-button").addEventListener("click", () => {
   history.pushState({ view: "loyalty" }, "", "/loyalty");
   showView("loyalty-view");
 });
+const loyaltyForm = $("loyalty-form");
+loyaltyForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = $("card-form-message");
+  const submit = $("card-submit");
+  message.textContent = "Надсилаємо замовлення…";
+  submit.disabled = true;
+  const formData = new FormData(loyaltyForm);
+  const payload = Object.fromEntries(formData.entries());
+  try {
+    const response = await fetch("/api/card-orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Не вдалося оформити замовлення.");
+    $("success-first-name").textContent = result.firstName;
+    $("success-order-number").textContent = result.orderNumber;
+    history.pushState({ view: "loyalty-success" }, "", "/loyalty/success");
+    showView("loyalty-success-view");
+    loyaltyForm.reset();
+  } catch (error) {
+    message.textContent = error.message || "Помилка з’єднання. Перевірте інтернет і спробуйте ще раз.";
+  } finally {
+    submit.disabled = false;
+  }
+});
 document.querySelectorAll("[data-home]").forEach((button) => button.addEventListener("click", home));
 $("minus-liter").addEventListener("click", () => {
   $("liters").value = Math.max(1, (Number($("liters").value) || 1) - 1);
@@ -85,6 +113,7 @@ function routeFromUrl(updateUrl = true) {
   if (match) return openMachine(decodeURIComponent(match[1]), false);
   if (path === "/machines") return showView("machine-list-view");
   if (path === "/loyalty") return showView("loyalty-view");
+  if (path === "/loyalty/success") return showView("loyalty-success-view");
   if (path.startsWith("/order/")) {
     const id = path.split("/")[2];
     if (MACHINE_IDS.includes(id)) return openMachine(id, false);
