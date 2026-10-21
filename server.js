@@ -1,13 +1,12 @@
+
 const express = require('express');
 const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
+const mysql = require('mysql2/promise');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MACHINES = ['31613', '31994', '32027', '393'];
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const ORDERS_FILE = path.join(DATA_DIR, 'card-orders.json');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 app.disable('x-powered-by');
@@ -15,41 +14,99 @@ app.use(express.json({ limit: '20kb' }));
 app.use(express.urlencoded({ extended: false, limit: '20kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-function ensureStorage() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(ORDERS_FILE)) fs.writeFileSync(ORDERS_FILE, '[]', { mode: 0o600 });
-}
-function readOrders() {
-  ensureStorage();
-  try { return JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8')); }
-  catch { throw new Error('Не вдалося прочитати файл замовлень'); }
-}
-function writeOrders(orders) {
-  ensureStorage();
-  const temp = `${ORDERS_FILE}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(orders, null, 2), { mode: 0o600 });
-  fs.renameSync(temp, ORDERS_FILE);
-}
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 5,
+  queueLimit: 20,
+  charset: 'utf8mb4',
+  timezone: 'Z'
+});
+
 function clean(value, max = 160) {
-  return String(value ?? '').trim().replace(/[<>\u0000-\u001f]/g, '').slice(0, max);
+  return String(value ?? '')
+    .trim()
+    .replace(/[<>\u0000-\u001f]/g, '')
+    .slice(0, max);
 }
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, c => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[c]));
+}
+
 function adminAuth(req, res, next) {
-  if (!ADMIN_PASSWORD) return res.status(503).send('Адмін-доступ не налаштовано. Додайте ADMIN_PASSWORD у змінних середовища Hostinger.');
+  if (!ADMIN_PASSWORD) {
+    return res.status(503).send(
+      'Адмін-доступ не налаштовано. Додайте ADMIN_PASSWORD у змінних середовища Hostinger.'
+    );
+  }
+
   const header = req.headers.authorization || '';
   const match = header.match(/^Basic\s+(.+)$/i);
+
   if (match) {
     let decoded = '';
-    try { decoded = Buffer.from(match[1], 'base64').toString('utf8'); } catch {}
-    const supplied = decoded.slice(decoded.indexOf(':') + 1);
+    try {
+      decoded = Buffer.from(match[1], 'base64').toString('utf8');
+    } catch {}
+
+    const colon = decoded.indexOf(':');
+    const supplied = colon >= 0 ? decoded.slice(colon + 1) : '';
     const a = Buffer.from(supplied);
     const b = Buffer.from(ADMIN_PASSWORD);
-    if (decoded.includes(':') && a.length === b.length && crypto.timingSafeEqual(a, b)) return next();
+
+    if (
+      colon >= 0 &&
+      a.length === b.length &&
+      crypto.timingSafeEqual(a, b)
+    ) {
+      return next();
+    }
   }
+
   res.set('WWW-Authenticate', 'Basic realm="PoVodu admin", charset="UTF-8"');
   return res.status(401).send('Потрібна авторизація адміністратора.');
 }
 
-app.post('/api/card-orders', (req, res) => {
+// Створюємо таблицю автоматично, якщо її ще немає.
+async function initDatabase() {
+  const required = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+  const missing = required.filter(key => !process.env[key]);
+
+  if (missing.length) {
+    throw new Error(`Не задані змінні середовища: ${missing.join(', ')}`);
+  }
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS card_orders (
+      id VARCHAR(36) NOT NULL PRIMARY KEY,
+      created_at DATETIME(3) NOT NULL,
+      status VARCHAR(40) NOT NULL DEFAULT 'Нове',
+      last_name VARCHAR(80) NOT NULL,
+      first_name VARCHAR(80) NOT NULL,
+      phone VARCHAR(30) NOT NULL,
+      machine_id VARCHAR(12) NOT NULL,
+      city VARCHAR(100) NOT NULL,
+      carrier VARCHAR(20) NOT NULL,
+      branch VARCHAR(180) NOT NULL,
+      INDEX idx_card_orders_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  console.log('MySQL підключено, таблиця card_orders готова.');
+}
+
+app.post('/api/card-orders', async (req, res) => {
   const lastName = clean(req.body.lastName, 80);
   const firstName = clean(req.body.firstName, 80);
   const phone = clean(req.body.phone, 30);
@@ -58,42 +115,156 @@ app.post('/api/card-orders', (req, res) => {
   const carrier = clean(req.body.carrier, 20);
   const branch = clean(req.body.branch, 180);
   const honeypot = clean(req.body.website, 100);
-  if (honeypot) return res.status(400).json({ error: 'Не вдалося оформити замовлення.' });
-  if (!lastName || !firstName || !phone || !machineId || !city || !carrier || !branch) {
-    return res.status(400).json({ error: 'Заповніть усі поля форми.' });
+
+  if (honeypot) {
+    return res.status(400).json({
+      error: 'Не вдалося оформити замовлення.'
+    });
   }
-  if (!MACHINES.includes(machineId)) return res.status(400).json({ error: 'Оберіть коректний номер водомату.' });
-  if (!/^\+?[0-9()\-\s]{9,20}$/.test(phone)) return res.status(400).json({ error: 'Перевірте номер телефону.' });
-  if (!['Нова пошта', 'Укрпошта'].includes(carrier)) return res.status(400).json({ error: 'Оберіть службу доставки.' });
+
+  if (!lastName || !firstName || !phone || !machineId ||
+      !city || !carrier || !branch) {
+    return res.status(400).json({
+      error: 'Заповніть усі поля форми.'
+    });
+  }
+
+  if (!MACHINES.includes(machineId)) {
+    return res.status(400).json({
+      error: 'Оберіть коректний номер водомату.'
+    });
+  }
+
+  if (!/^\+?[0-9()\-\s]{9,20}$/.test(phone)) {
+    return res.status(400).json({
+      error: 'Перевірте номер телефону.'
+    });
+  }
+
+  if (!['Нова пошта', 'Укрпошта'].includes(carrier)) {
+    return res.status(400).json({
+      error: 'Оберіть службу доставки.'
+    });
+  }
+
   try {
-    const orders = readOrders();
-    const order = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      status: 'Нове',
-      lastName, firstName, phone, machineId, city, carrier, branch
-    };
-    orders.unshift(order);
-    writeOrders(orders);
-    return res.status(201).json({ ok: true, firstName, orderNumber: order.id.slice(0, 8).toUpperCase() });
+    const id = crypto.randomUUID();
+
+    await pool.execute(
+      `INSERT INTO card_orders
+        (id, created_at, status, last_name, first_name, phone,
+         machine_id, city, carrier, branch)
+       VALUES (?, UTC_TIMESTAMP(3), ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, 'Нове', lastName, firstName, phone,
+        machineId, city, carrier, branch
+      ]
+    );
+
+    return res.status(201).json({
+      ok: true,
+      firstName,
+      orderNumber: id.slice(0, 8).toUpperCase()
+    });
   } catch (error) {
     console.error('Card order save failed:', error.message);
-    return res.status(500).json({ error: 'Не вдалося зберегти замовлення. Спробуйте пізніше.' });
+    return res.status(500).json({
+      error: 'Не вдалося зберегти замовлення. Спробуйте пізніше.'
+    });
   }
 });
 
-app.get('/admin', adminAuth, (_req, res) => {
-  const orders = readOrders();
-  const rows = orders.map(o => `<tr><td>${escapeHtml(new Date(o.createdAt).toLocaleString('uk-UA'))}</td><td>${escapeHtml(o.lastName)} ${escapeHtml(o.firstName)}</td><td>${escapeHtml(o.phone)}</td><td>${escapeHtml(o.machineId)}</td><td>${escapeHtml(o.city)}</td><td>${escapeHtml(o.carrier)}</td><td>${escapeHtml(o.branch)}</td><td>${escapeHtml(o.status)}</td></tr>`).join('');
-  res.type('html').send(`<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Замовлення карток — ПоВоду</title><style>body{font:15px system-ui,sans-serif;margin:24px;color:#12314a}h1{color:#0877bd}p{color:#55748a} .wrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:950px}th,td{padding:11px;border:1px solid #d7eaf5;text-align:left}th{background:#eaf7ff}tr:nth-child(even){background:#f7fbfe}</style></head><body><h1>Замовлення карток постійного клієнта</h1><p>Усього замовлень: ${orders.length}. Дані призначені для оформлення карток і доставки; зберігайте їх конфіденційно.</p><div class="wrap"><table><thead><tr><th>Дата</th><th>Клієнт</th><th>Телефон</th><th>Водомат</th><th>Місто</th><th>Служба</th><th>Відділення</th><th>Статус</th></tr></thead><tbody>${rows || '<tr><td colspan="8">Замовлень поки немає.</td></tr>'}</tbody></table></div></body></html>`);
+app.get('/admin', adminAuth, async (_req, res) => {
+  try {
+    const [orders] = await pool.execute(
+      `SELECT id, created_at, status, last_name, first_name,
+              phone, machine_id, city, carrier, branch
+       FROM card_orders
+       ORDER BY created_at DESC`
+    );
+
+    const rows = orders.map(o => {
+      const date = new Date(
+        String(o.created_at).replace(' ', 'T') + 'Z'
+      );
+
+      return `<tr>
+        <td>${escapeHtml(date.toLocaleString('uk-UA', {
+          timeZone: 'Europe/Kyiv'
+        }))}</td>
+        <td>${escapeHtml(o.last_name)} ${escapeHtml(o.first_name)}</td>
+        <td>${escapeHtml(o.phone)}</td>
+        <td>${escapeHtml(o.machine_id)}</td>
+        <td>${escapeHtml(o.city)}</td>
+        <td>${escapeHtml(o.carrier)}</td>
+        <td>${escapeHtml(o.branch)}</td>
+        <td>${escapeHtml(o.status)}</td>
+      </tr>`;
+    }).join('');
+
+    res.type('html').send(`<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Замовлення карток — ПоВоду</title>
+<style>
+body{font:15px system-ui,sans-serif;margin:24px;color:#12314a}
+h1{color:#0877bd}
+p{color:#55748a}
+.wrap{overflow:auto}
+table{border-collapse:collapse;width:100%;min-width:950px}
+th,td{padding:11px;border:1px solid #d7eaf5;text-align:left}
+th{background:#eaf7ff}
+tr:nth-child(even){background:#f7fbfe}
+</style>
+</head>
+<body>
+<h1>Замовлення карток постійного клієнта</h1>
+<p>Усього замовлень: ${orders.length}.
+Дані призначені для оформлення карток і доставки; зберігайте їх конфіденційно.</p>
+<div class="wrap">
+<table>
+<thead><tr>
+<th>Дата</th><th>Клієнт</th><th>Телефон</th><th>Водомат</th>
+<th>Місто</th><th>Служба</th><th>Відділення</th><th>Статус</th>
+</tr></thead>
+<tbody>${rows || '<tr><td colspan="8">Замовлень поки немає.</td></tr>'}</tbody>
+</table>
+</div>
+</body>
+</html>`);
+  } catch (error) {
+    console.error('Admin orders load failed:', error.message);
+    return res.status(500).send('Не вдалося завантажити замовлення.');
+  }
 });
-function escapeHtml(v) {
-  return String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
 
 app.get('/machine/:id', (req, res) => {
-  if (!MACHINES.includes(String(req.params.id))) return res.status(404).sendFile(path.join(__dirname, 'public', 'not-found.html'));
+  if (!MACHINES.includes(String(req.params.id))) {
+    return res.status(404).sendFile(
+      path.join(__dirname, 'public', 'not-found.html')
+    );
+  }
+
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.listen(PORT, '0.0.0.0', () => console.log(`ПоВоду запущено на порту ${PORT}`));
+
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+async function start() {
+  try {
+    await initDatabase();
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`ПоВоду запущено на порту ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Не вдалося запустити застосунок:', error.message);
+    process.exit(1);
+  }
+}
+
+start();
