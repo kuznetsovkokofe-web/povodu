@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0877bd">
-  <meta name="description" content="ПоВоду — Джерело біля дому. Зручне замовлення питної води.">
+  <meta name="description" content="ПоВоду — Джерело біля дому. Чиста питна вода поруч.">
   <title>ПоВоду — Джерело біля дому</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="/" aria-label="ПоВоду — головна">
-      <span class="brand-mark">↝</span>
+      <svg class="brand-mark" viewBox="0 0 64 76" role="img" aria-label="Крапля з горами та джерелом"><defs><linearGradient id="dropBlue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#36c9f0"/><stop offset="1" stop-color="#0877bd"/></linearGradient></defs><path d="M32 3C26 15 5 38 5 49a27 27 0 0 0 54 0C59 38 38 15 32 3Z" fill="url(#dropBlue)"/><path d="M11 45 24 29l8 9 8-13 14 20" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 51h40c-7 3-15 4-20 9-4-4-11-6-20-9Z" fill="#fff" opacity=".95"/><path d="M31 54c-3 4-1 7 4 10" fill="none" stroke="#0877bd" stroke-width="3" stroke-linecap="round"/></svg>
       <span>ПоВоду</span>
     </a>
     <span class="tagline">Джерело біля дому</span>
@@ -19,69 +19,36 @@
 
   <main class="shell">
     <section id="home-view" class="hero view">
-      <div class="drop" aria-hidden="true">💧</div>
-      <p class="eyebrow">Чиста вода поруч</p>
-      <h1>Вода для вашого дому.<br><span>Просто й зручно.</span></h1>
-      <p class="intro">Оберіть водомат або відскануйте QR-код на апараті, щоб почати замовлення.</p>
-      <div class="actions">
-        <button class="button primary" id="start-water">Набрати воду</button>
-        <button class="button secondary" id="loyalty-button">Отримати карту постійного клієнта</button>
+      <div class="hero-content">
+        <svg class="hero-logo" viewBox="0 0 64 76" aria-hidden="true"><defs><linearGradient id="heroDrop" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#32c9ef"/><stop offset="1" stop-color="#0877bd"/></linearGradient></defs><path d="M32 3C26 15 5 38 5 49a27 27 0 0 0 54 0C59 38 38 15 32 3Z" fill="url(#heroDrop)"/><path d="M11 45 24 29l8 9 8-13 14 20" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 51h40c-7 3-15 4-20 9-4-4-11-6-20-9Z" fill="#fff"/><path d="M31 54c-3 4-1 7 4 10" fill="none" stroke="#0877bd" stroke-width="3" stroke-linecap="round"/></svg>
+        <p class="eyebrow">Чиста вода поруч</p>
+        <h1>Джерело біля дому<br><span>Просто й зручно.</span></h1>
+        <p class="intro">Оберіть водомат або відскануйте QR-код на апараті, щоб почати замовлення.</p>
+        <div class="actions">
+          <button class="button primary" id="start-water">Набрати воду <span aria-hidden="true">→</span></button>
+          <button class="button secondary" id="loyalty-button">Отримати карту постійного клієнта</button>
+        </div>
       </div>
     </section>
 
     <section id="machine-list-view" class="panel view hidden">
-      <button class="back-link" data-home>← На головну</button>
-      <p class="eyebrow">Крок 1</p>
-      <h1>Оберіть водомат</h1>
-      <p class="muted">Якщо ви біля апарата, відскануйте його QR-код — цей крок буде пропущено автоматично.</p>
-      <div id="machine-list" class="machine-list"></div>
+      <button class="back-link" data-home>← На головну</button><p class="eyebrow">Крок 1</p><h1>Оберіть водомат</h1>
+      <p class="muted">Якщо ви біля апарата, відскануйте його QR-код — цей крок буде пропущено автоматично.</p><div id="machine-list" class="machine-list"></div>
     </section>
 
     <section id="machine-view" class="panel view hidden">
-      <button class="back-link" data-home>← На головну</button>
-      <p class="eyebrow">Замовлення води</p>
-      <h1>Водомат <span id="machine-number"></span></h1>
+      <button class="back-link" data-home>← На головну</button><p class="eyebrow">Замовлення води</p><h1>Водомат № <span id="machine-number"></span></h1>
       <div class="step-note">Перевірте номер апарата перед продовженням.</div>
       <label class="field-label" for="water-type">Тип води</label>
-      <div class="water-options">
-        <label class="water-option"><input type="radio" name="waterType" value="purified" checked><span><strong>Очищена вода</strong><small>Питна вода після очищення</small></span></label>
-        <label class="water-option"><input type="radio" name="waterType" value="mineralized"><span><strong>Мінералізована вода</strong><small>Вода з додаванням мінералів</small></span></label>
-      </div>
-      <label class="field-label" for="liters">Кількість літрів</label>
-      <div class="liter-control">
-        <button type="button" id="minus-liter" aria-label="Зменшити на один літр">−</button>
-        <input id="liters" type="number" min="1" max="100" step="1" value="5" inputmode="numeric">
-        <button type="button" id="plus-liter" aria-label="Збільшити на один літр">+</button>
-      </div>
-      <p class="muted small">Ціни та онлайн-оплата будуть активовані після налаштування платіжного сервісу.</p>
-      <button class="button primary full" id="continue-button">Перевірити замовлення</button>
-      <p id="order-message" class="message" role="status"></p>
+      <div class="water-options"><label class="water-option"><input type="radio" name="waterType" value="purified" checked><span><strong>Очищена вода</strong><small>Питна вода після очищення</small></span></label><label class="water-option"><input type="radio" name="waterType" value="mineralized"><span><strong>Мінералізована вода</strong><small>Вода з додаванням мінералів</small></span></label></div>
+      <label class="field-label" for="liters">Кількість літрів</label><div class="liter-control"><button type="button" id="minus-liter" aria-label="Зменшити на один літр">−</button><input id="liters" type="number" min="1" max="100" step="1" value="5" inputmode="numeric"><button type="button" id="plus-liter" aria-label="Збільшити на один літр">+</button></div>
+      <p class="muted small">Онлайн-оплата та автоматична видача води ще налаштовуються.</p><button class="button primary full" id="continue-button">Перевірити замовлення</button><p id="order-message" class="message" role="status"></p>
     </section>
 
-    <section id="loyalty-view" class="panel view hidden">
-      <button class="back-link" data-home>← На головну</button>
-      <p class="eyebrow">Карта клієнта</p>
-      <h1>Карта постійного клієнта</h1>
-      <p class="muted">Тут буде оформлення карти та бонусна система. Ми додамо реєстрацію після узгодження правил нарахування бонусів.</p>
-      <div class="loyalty-card"><span>ПоВоду</span><strong>Джерело біля дому</strong><span class="card-dots">•••• •••• •••• 0000</span></div>
-    </section>
+    <section id="loyalty-view" class="panel view hidden"><button class="back-link" data-home>← На головну</button><p class="eyebrow">Карта клієнта</p><h1>Карта постійного клієнта</h1><p class="muted">Тут буде оформлення карти та бонусна система. Реєстрацію додамо після узгодження правил нарахування бонусів.</p><div class="loyalty-card"><span>ПоВоду</span><strong>Джерело біля дому</strong><span class="card-dots">•••• •••• •••• 0000</span></div></section>
 
-    <section id="review-view" class="panel view hidden">
-      <button class="back-link" id="edit-order">← Змінити замовлення</button>
-      <p class="eyebrow">Перевірка</p>
-      <h1>Ваше замовлення</h1>
-      <div class="review-box">
-        <div><span>Водомат</span><strong id="review-machine"></strong></div>
-        <div><span>Тип води</span><strong id="review-water"></strong></div>
-        <div><span>Кількість</span><strong id="review-liters"></strong></div>
-      </div>
-      <p class="muted">Це попередній перегляд. Оплата ще не підключена, і команда водомату не надсилається.</p>
-      <button class="button primary full" id="finish-demo">Повернутися до сайту</button>
-      <p class="message">Наступний етап — серверна інтеграція Monopay та WaterCRM.</p>
-    </section>
+    <section id="review-view" class="panel view hidden"><button class="back-link" id="edit-order">← Змінити замовлення</button><p class="eyebrow">Перевірка</p><h1>Ваше замовлення</h1><div class="review-box"><div><span>Водомат</span><strong id="review-machine"></strong></div><div><span>Тип води</span><strong id="review-water"></strong></div><div><span>Кількість</span><strong id="review-liters"></strong></div></div><p class="muted">Це попередній перегляд. Оплата ще не підключена, команда водомату не надсилається.</p><button class="button primary full" id="finish-demo">Повернутися до сайту</button><p class="message">Наступний етап — серверна інтеграція Monopay, SIM4 та WaterCRM.</p></section>
   </main>
-
   <footer><span>© <span id="year"></span> ПоВоду</span><span>Джерело біля дому</span></footer>
   <script src="/app.js" defer></script>
-</body>
-</html>
+</body></html>
