@@ -124,6 +124,126 @@ async function initDatabase() {
 }
 // Створення тестового рахунку Monobank для водомата 393.
 // Видача води на цьому етапі не виконується.
+
+let monoWebhookPublicKey = null;
+
+app.post('/api/payments/webhook', async (req, res) => {
+  const token = process.env.MONO_TOKEN;
+  const signature = req.get('X-Sign');
+
+  if (!token || !signature || !req.rawBody) {
+    return res.sendStatus(400);
+  }
+
+  try {
+    // Отримуємо відкритий ключ Monobank і кешуємо його.
+    if (!monoWebhookPublicKey) {
+      const keyResponse = await fetch(
+        'https://api.monobank.ua/api/merchant/pubkey',
+        {
+          headers: { 'X-Token': token },
+          signal: AbortSignal.timeout(10000)
+        }
+      );
+
+      if (!keyResponse.ok) {
+        throw new Error('Не вдалося отримати ключ Monobank');
+      }
+
+      const keyData = await keyResponse.json();
+
+      if (!keyData.key) {
+        throw new Error('Monobank не повернув відкритий ключ');
+      }
+
+      monoWebhookPublicKey = Buffer.from(keyData.key, 'base64');
+    }
+
+    // Перевіряємо підпис саме оригінального тіла запиту.
+    const validSignature = crypto.verify(
+      'sha256',
+      req.rawBody,
+      monoWebhookPublicKey,
+      Buffer.from(signature, 'base64')
+    );
+
+    if (!validSignature) {
+      return res.sendStatus(401);
+    }
+
+    const event = JSON.parse(req.rawBody.toString('utf8'));
+
+    if (
+      !event.invoiceId ||
+      !event.reference ||
+      !Number.isInteger(event.amount) ||
+      event.ccy !== 980 ||
+      !event.status
+    ) {
+      return res.sendStatus(400);
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT id, invoice_id, amount, status
+       FROM water_payments
+       WHERE id = ? AND invoice_id = ?
+       LIMIT 1`,
+      [event.reference, event.invoiceId]
+    );
+
+    if (rows.length !== 1) {
+      console.error('Webhook: замовлення не знайдено');
+      return res.sendStatus(200);
+    }
+
+    const payment = rows[0];
+
+    if (Number(payment.amount) !== event.amount) {
+      console.error('Webhook: сума не збігається');
+      return res.sendStatus(200);
+    }
+
+    // Оплачене замовлення не можна понизити іншим webhook.
+    if (payment.status === 'paid') {
+      return res.sendStatus(200);
+    }
+
+    if (event.status === 'success') {
+      await pool.execute(
+        `UPDATE water_payments
+         SET status = 'paid'
+         WHERE id = ?
+           AND invoice_id = ?
+           AND amount = ?
+           AND status <> 'paid'`,
+        [payment.id, payment.invoice_id, event.amount]
+      );
+    } else {
+      // Зберігаємо статуси для діагностики, але не видаємо воду.
+      const safeStatus = [
+        'created',
+        'processing',
+        'failure',
+        'reversed'
+      ].includes(event.status) ? event.status : 'unknown';
+
+      await pool.execute(
+        `UPDATE water_payments
+         SET status = ?
+         WHERE id = ?
+           AND invoice_id = ?
+           AND status <> 'paid'`,
+        [safeStatus, payment.id, payment.invoice_id]
+      );
+    }
+
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error('Monobank webhook error:', error.message);
+    return res.sendStatus(500);
+  }
+});
+
 app.post('/api/payments/create', async (req, res) => {
   const token = process.env.MONO_TOKEN;
 
