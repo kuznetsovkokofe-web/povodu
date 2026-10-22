@@ -172,6 +172,7 @@ app.post('/api/payments/create', async (req, res) => {
         body: JSON.stringify({
           amount,
           ccy: 980,
+          webHookUrl: 'https://povodu.online/api/payments/webhook',
           merchantPaymInfo: {
             reference: paymentId,
             destination: `${waterName}, ${liters} л, водомат 393`,
