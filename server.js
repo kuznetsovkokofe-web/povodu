@@ -130,6 +130,12 @@ let monoWebhookPublicKey = null;
 app.post('/api/payments/webhook', async (req, res) => {
   const token = process.env.MONO_TOKEN;
     console.log('MONO WEBHOOK RECEIVED', new Date().toISOString());
+  console.log('WEBHOOK DEBUG', {
+  method: req.method,
+  url: req.originalUrl,
+  hasSignature: !!req.get('X-Sign'),
+  bodyKeys: Object.keys(req.body || {})
+});
   const signature = req.get('X-Sign');
 
   if (!token || !signature || !req.rawBody) {
