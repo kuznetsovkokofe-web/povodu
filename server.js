@@ -102,7 +102,20 @@ async function initDatabase() {
       INDEX idx_card_orders_created_at (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
-
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS water_payments (
+      id VARCHAR(36) NOT NULL PRIMARY KEY,
+      invoice_id VARCHAR(100) NULL UNIQUE,
+      created_at DATETIME(3) NOT NULL,
+      machine_id VARCHAR(12) NOT NULL,
+      type_id INT NOT NULL,
+      liters INT NOT NULL,
+      amount INT NOT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'creating',
+      page_url TEXT NULL,
+      INDEX idx_water_payments_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
   console.log('MySQL підключено, таблиця card_orders готова.');
 }
 
