@@ -133,9 +133,13 @@ app.post('/api/payments/webhook', async (req, res) => {
   const signature = req.get('X-Sign');
 
   if (!token || !signature || !req.rawBody) {
-    return res.sendStatus(400);
-  }
-
+  console.log('MONO WEBHOOK MISSING DATA', {
+    tokenPresent: !!token,
+    signaturePresent: !!signature,
+    rawBodyPresent: !!req.rawBody
+  });
+  return res.sendStatus(400);
+}
   try {
     // Отримуємо відкритий ключ Monobank і кешуємо його.
     if (!monoWebhookPublicKey) {
