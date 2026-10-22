@@ -10,7 +10,11 @@ const MACHINES = ['31613', '31994', '32027', '393'];
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 app.disable('x-powered-by');
-app.use(express.json({ limit: '20kb' }));
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = Buffer.from(buf);
+  }
+}));
 app.use(express.urlencoded({ extended: false, limit: '20kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
