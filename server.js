@@ -118,7 +118,122 @@ async function initDatabase() {
   `);
   console.log('MySQL підключено, таблиця card_orders готова.');
 }
+// Створення тестового рахунку Monobank для водомата 393.
+// Видача води на цьому етапі не виконується.
+app.post('/api/payments/create', async (req, res) => {
+  const token = process.env.MONO_TOKEN;
 
+  if (!token) {
+    return res.status(503).json({
+      error: 'Оплата тимчасово недоступна.'
+    });
+  }
+
+  const typeId = Number(req.body.typeId);
+  const liters = Number(req.body.liters);
+
+  if (![1, 2].includes(typeId)) {
+    return res.status(400).json({
+      error: 'Оберіть коректний тип води.'
+    });
+  }
+
+  // Цілі літри; не дозволяємо випадкові чи надмірні суми.
+  if (!Number.isInteger(liters) || liters < 1 || liters > 100) {
+    return res.status(400).json({
+      error: 'Кількість має бути від 1 до 100 літрів.'
+    });
+  }
+
+  const pricePerLiter = typeId === 1 ? 3 : 4;
+  const amount = liters * pricePerLiter * 100;
+  const paymentId = crypto.randomUUID();
+  const waterName = typeId === 1
+    ? 'Очищена вода'
+    : 'Мінералізована вода';
+
+  try {
+    // Спершу реєструємо замовлення в БД.
+    await pool.execute(
+      `INSERT INTO water_payments
+        (id, created_at, machine_id, type_id, liters, amount, status)
+       VALUES (?, UTC_TIMESTAMP(3), '393', ?, ?, ?, 'creating')`,
+      [paymentId, typeId, liters, amount]
+    );
+
+    const monoResponse = await fetch(
+      'https://api.monobank.ua/api/merchant/invoice/create',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Token': token
+        },
+        body: JSON.stringify({
+          amount,
+          ccy: 980,
+          merchantPaymInfo: {
+            reference: paymentId,
+            destination: `${waterName}, ${liters} л, водомат 393`,
+            comment: `Замовлення ${paymentId}`
+          }
+        }),
+        signal: AbortSignal.timeout(15000)
+      }
+    );
+
+    const monoData = await monoResponse.json().catch(() => ({}));
+
+    if (
+      !monoResponse.ok ||
+      !monoData.invoiceId ||
+      !monoData.pageUrl
+    ) {
+      console.error(
+        'Monobank invoice creation failed:',
+        monoResponse.status,
+        JSON.stringify(monoData).slice(0, 1000)
+      );
+
+      await pool.execute(
+        `UPDATE water_payments SET status = 'create_failed'
+         WHERE id = ? AND status = 'creating'`,
+        [paymentId]
+      );
+
+      return res.status(502).json({
+        error: 'Не вдалося створити рахунок. Спробуйте пізніше.'
+      });
+    }
+
+    await pool.execute(
+      `UPDATE water_payments
+       SET invoice_id = ?, page_url = ?, status = 'pending'
+       WHERE id = ?`,
+      [monoData.invoiceId, monoData.pageUrl, paymentId]
+    );
+
+    return res.status(201).json({
+      ok: true,
+      paymentId,
+      amount: amount / 100,
+      currency: 'UAH',
+      pageUrl: monoData.pageUrl
+    });
+  } catch (error) {
+    console.error('Payment creation failed:', error.message);
+
+    await pool.execute(
+      `UPDATE water_payments SET status = 'create_failed'
+       WHERE id = ? AND status = 'creating'`,
+      [paymentId]
+    ).catch(() => {});
+
+    return res.status(502).json({
+      error: 'Помилка під час створення платежу.'
+    });
+  }
+});
 app.post('/api/card-orders', async (req, res) => {
   const lastName = clean(req.body.lastName, 80);
   const firstName = clean(req.body.firstName, 80);
