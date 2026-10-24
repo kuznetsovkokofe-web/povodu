@@ -210,7 +210,7 @@ console.log('MONO WEBHOOK EVENT', {
        LIMIT 1`,
       [event.reference, event.invoiceId]
     );
-
+console.log('MONO WEBHOOK DB MATCH', { rowsFound: rows.length });
     if (rows.length !== 1) {
       console.error('Webhook: замовлення не знайдено');
       return res.sendStatus(200);
