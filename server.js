@@ -186,7 +186,13 @@ app.post('/api/payments/webhook', async (req, res) => {
 console.log('MONO WEBHOOK SIGNATURE VALID');
 
     const event = JSON.parse(req.rawBody.toString('utf8'));
-
+console.log('MONO WEBHOOK EVENT', {
+  status: event.status,
+  amount: event.amount,
+  ccy: event.ccy,
+  referencePresent: !!event.reference,
+  invoiceIdPresent: !!event.invoiceId
+});
     if (
       !event.invoiceId ||
       !event.reference ||
