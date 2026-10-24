@@ -179,8 +179,11 @@ app.post('/api/payments/webhook', async (req, res) => {
     );
 
     if (!validSignature) {
-      return res.sendStatus(401);
-    }
+  console.error('MONO WEBHOOK INVALID SIGNATURE');
+  return res.sendStatus(401);
+}
+
+console.log('MONO WEBHOOK SIGNATURE VALID');
 
     const event = JSON.parse(req.rawBody.toString('utf8'));
 
