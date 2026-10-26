@@ -379,6 +379,37 @@ app.post('/api/payments/create', async (req, res) => {
     });
   }
 });
+
+app.get('/api/watercrm-test', async (req, res) => {
+  try {
+    const response = await fetch(
+      'https://water.net.ua/places/operator-window',
+      {
+        method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10000)
+      }
+    );
+
+    console.log('WaterCRM test:', {
+      status: response.status,
+      redirect: response.headers.get('location')
+    });
+
+    return res.json({
+      ok: true,
+      status: response.status,
+      redirected: response.status >= 300 && response.status < 400
+    });
+  } catch (error) {
+    console.error('WaterCRM test failed:', error.message);
+    return res.status(502).json({
+      ok: false,
+      error: 'Не вдалося підключитися до WaterCRM'
+    });
+  }
+});
+
 app.post('/api/card-orders', async (req, res) => {
   const lastName = clean(req.body.lastName, 80);
   const firstName = clean(req.body.firstName, 80);
