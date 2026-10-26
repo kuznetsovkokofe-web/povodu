@@ -327,10 +327,11 @@ console.log('MONO WEBHOOK EVENT', {
     }
 
     const [rows] = await pool.execute(
-      `SELECT id, invoice_id, amount, status
-       FROM water_payments
-       WHERE id = ? AND invoice_id = ?
-       LIMIT 1`,
+      `SELECT id, invoice_id, amount, status,
+        machine_id, type_id, liters, dispense_status
+ FROM water_payments
+ WHERE id = ? AND invoice_id = ?
+ LIMIT 1`,
       [event.reference, event.invoiceId]
     );
 console.log('MONO WEBHOOK DB MATCH', { rowsFound: rows.length });
@@ -351,34 +352,92 @@ console.log('MONO WEBHOOK DB MATCH', { rowsFound: rows.length });
       return res.sendStatus(200);
     }
 
-    if (event.status === 'success') {
-      await pool.execute(
-        `UPDATE water_payments
-         SET status = 'paid'
-         WHERE id = ?
-           AND invoice_id = ?
-           AND amount = ?
-           AND status <> 'paid'`,
-        [payment.id, payment.invoice_id, event.amount]
-      );
-    } else {
-      // Зберігаємо статуси для діагностики, але не видаємо воду.
-      const safeStatus = [
-        'created',
-        'processing',
-        'failure',
-        'reversed'
-      ].includes(event.status) ? event.status : 'unknown';
+    
+if (event.status === 'success') {
+  // Спершу фіксуємо підтверджену оплату.
+  await pool.execute(
+    `UPDATE water_payments
+     SET status = 'paid'
+     WHERE id = ?
+       AND invoice_id = ?
+       AND amount = ?
+       AND status <> 'paid'`,
+    [payment.id, payment.invoice_id, event.amount]
+  );
+
+  // Атомарно дозволяємо лише одному webhook запустити видачу.
+  const [claim] = await pool.execute(
+    `UPDATE water_payments
+     SET dispense_status = 'processing'
+     WHERE id = ?
+       AND invoice_id = ?
+       AND status = 'paid'
+       AND dispense_status = 'pending'`,
+    [payment.id, payment.invoice_id]
+  );
+
+  if (claim.affectedRows === 1) {
+    try {
+      if (payment.machine_id !== '393') {
+        throw new Error(
+          `Непідтримуваний водомат: ${payment.machine_id}`
+        );
+      }
+
+      const result = await waterCrmDispense({
+        liters: payment.liters,
+        typeId: payment.type_id
+      });
 
       await pool.execute(
         `UPDATE water_payments
-         SET status = ?
-         WHERE id = ?
-           AND invoice_id = ?
-           AND status <> 'paid'`,
-        [safeStatus, payment.id, payment.invoice_id]
+         SET dispense_status = 'command_sent'
+         WHERE id = ? AND dispense_status = 'processing'`,
+        [payment.id]
       );
+
+      console.log('WATERCRM COMMAND ACCEPTED', {
+        paymentId: payment.id,
+        liters: payment.liters,
+        typeId: payment.type_id,
+        result
+      });
+    } catch (dispenseError) {
+      await pool.execute(
+        `UPDATE water_payments
+         SET dispense_status = 'failed'
+         WHERE id = ? AND dispense_status = 'processing'`,
+        [payment.id]
+      );
+
+      console.error('WATERCRM DISPENSE FAILED', {
+        paymentId: payment.id,
+        error: dispenseError.message
+      });
     }
+  } else {
+    console.log('Water dispensing already claimed or processed', {
+      paymentId: payment.id
+    });
+  }
+} else {
+  const safeStatus = [
+    'created',
+    'processing',
+    'failure',
+    'reversed'
+  ].includes(event.status) ? event.status : 'unknown';
+
+  await pool.execute(
+    `UPDATE water_payments
+     SET status = ?
+     WHERE id = ?
+       AND invoice_id = ?
+       AND status <> 'paid'`,
+    [safeStatus, payment.id, payment.invoice_id]
+  );
+}
+
 
     return res.sendStatus(200);
   } catch (error) {
