@@ -397,10 +397,11 @@ app.get('/api/watercrm-test', async (req, res) => {
     });
 
     return res.json({
-      ok: true,
-      status: response.status,
-      redirected: response.status >= 300 && response.status < 400
-    });
+  ok: true,
+  status: response.status,
+  redirected: response.status >= 300 && response.status < 400,
+  redirectTo: response.headers.get('location')
+});
   } catch (error) {
     console.error('WaterCRM test failed:', error.message);
     return res.status(502).json({
