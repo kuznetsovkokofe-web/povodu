@@ -346,13 +346,7 @@ console.log('MONO WEBHOOK DB MATCH', { rowsFound: rows.length });
       console.error('Webhook: сума не збігається');
       return res.sendStatus(200);
     }
-
-    // Оплачене замовлення не можна понизити іншим webhook.
-    if (payment.status === 'paid') {
-      return res.sendStatus(200);
-    }
-
-    
+   
 if (event.status === 'success') {
   // Спершу фіксуємо підтверджену оплату.
   await pool.execute(
