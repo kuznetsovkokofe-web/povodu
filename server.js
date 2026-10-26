@@ -48,6 +48,129 @@ function escapeHtml(value) {
   }[c]));
 }
 
+function waterCrmCookieHeader(jar) {
+  return [...jar.entries()]
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+function waterCrmUpdateCookies(headers, jar) {
+  let cookies = [];
+
+  if (typeof headers.getSetCookie === 'function') {
+    cookies = headers.getSetCookie();
+  } else {
+    const value = headers.get('set-cookie');
+    if (value) cookies = [value];
+  }
+
+  for (const cookie of cookies) {
+    const pair = cookie.split(';', 1)[0];
+    const index = pair.indexOf('=');
+    if (index > 0) {
+      jar.set(pair.slice(0, index).trim(), pair.slice(index + 1).trim());
+    }
+  }
+}
+
+function waterCrmExtractCsrf(html) {
+  const patterns = [
+    /<input[^>]+name=["']_csrf["'][^>]+value=["']([^"']+)["']/i,
+    /<input[^>]+value=["']([^"']+)["'][^>]+name=["']_csrf["']/i,
+    /<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match) return match[1].replace(/&amp;/g, '&');
+  }
+
+  return null;
+}
+
+async function waterCrmLogin() {
+  const username = process.env.WATERCRM_USERNAME;
+  const password = process.env.WATERCRM_PASSWORD;
+
+  if (!username || !password) {
+    throw new Error('Не налаштовано логін або пароль WaterCRM');
+  }
+
+  const base = 'https://water.net.ua';
+  const jar = new Map();
+
+  const page = await fetch(`${base}/login`, {
+    redirect: 'manual',
+    signal: AbortSignal.timeout(15000)
+  });
+
+  waterCrmUpdateCookies(page.headers, jar);
+
+  if (page.status !== 200) {
+    throw new Error(`WaterCRM login page: HTTP ${page.status}`);
+  }
+
+  const html = await page.text();
+  const csrf = waterCrmExtractCsrf(html);
+
+  if (!csrf) {
+    throw new Error('Не знайдено CSRF-поле форми WaterCRM');
+  }
+
+  const form = new URLSearchParams({
+    '_csrf': csrf,
+    'LoginForm[username]': username,
+    'LoginForm[password]': password,
+    'LoginForm[rememberMe]': '1',
+    'login-button': 'Login'
+  });
+
+  const login = await fetch(`${base}/login`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Cookie': waterCrmCookieHeader(jar),
+      'Referer': `${base}/login`,
+      'Origin': base
+    },
+    body: form.toString(),
+    signal: AbortSignal.timeout(15000)
+  });
+
+  waterCrmUpdateCookies(login.headers, jar);
+
+  if (![302, 303].includes(login.status)) {
+    throw new Error(`WaterCRM login returned HTTP ${login.status}`);
+  }
+
+  const operator = await fetch(`${base}/places/operator-window`, {
+    redirect: 'manual',
+    headers: {
+      'Cookie': waterCrmCookieHeader(jar),
+      'Referer': `${base}/`
+    },
+    signal: AbortSignal.timeout(15000)
+  });
+
+  if (operator.status !== 200) {
+    throw new Error(
+      `WaterCRM operator window returned HTTP ${operator.status}`
+    );
+  }
+
+  const operatorHtml = await operator.text();
+
+  if (/\/login/.test(operator.headers.get('location') || '')) {
+    throw new Error('WaterCRM не підтвердив авторизацію');
+  }
+
+  const operatorCsrf = waterCrmExtractCsrf(operatorHtml) || csrf;
+
+  return { jar, csrf: operatorCsrf };
+}
+
 function adminAuth(req, res, next) {
   if (!ADMIN_PASSWORD) {
     return res.status(503).send(
@@ -407,6 +530,28 @@ app.get('/api/watercrm-test', async (req, res) => {
     return res.status(502).json({
       ok: false,
       error: 'Не вдалося підключитися до WaterCRM'
+    });
+  }
+});
+
+app.get('/api/watercrm-auth-test', adminAuth, async (req, res) => {
+  try {
+    const session = await waterCrmLogin();
+
+    console.log('WaterCRM auth test: successful');
+
+    return res.json({
+      ok: true,
+      authenticated: true,
+      operatorWindow: 'accessible'
+    });
+  } catch (error) {
+    console.error('WaterCRM auth test failed:', error.message);
+
+    return res.status(502).json({
+      ok: false,
+      authenticated: false,
+      error: error.message
     });
   }
 });
