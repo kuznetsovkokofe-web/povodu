@@ -383,7 +383,7 @@ app.post('/api/payments/create', async (req, res) => {
 app.get('/api/watercrm-test', async (req, res) => {
   try {
     const response = await fetch(
-      'https://water.net.ua/places/operator-window',
+      'https://water.net.ua/',
       {
         method: 'GET',
         redirect: 'manual',
