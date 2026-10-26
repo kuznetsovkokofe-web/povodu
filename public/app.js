@@ -87,25 +87,73 @@ $("minus-liter").addEventListener("click", () => {
 $("plus-liter").addEventListener("click", () => {
   $("liters").value = Math.min(100, (Number($("liters").value) || 1) + 1);
 });
-$("continue-button").addEventListener("click", () => {
+
+$("continue-button").addEventListener("click", async () => {
   const liters = Number($("liters").value);
+  const message = $("order-message");
+  const button = $("continue-button");
+
   if (!selectedMachine) {
-    $("order-message").textContent = "Спочатку оберіть водомат.";
+    message.textContent = "Спочатку оберіть водомат.";
     return;
   }
+
   if (!Number.isInteger(liters) || liters < 1 || liters > 100) {
-    $("order-message").textContent = "Вкажіть цілу кількість літрів від 1 до 100.";
+    message.textContent = "Вкажіть цілу кількість літрів від 1 до 100.";
     return;
   }
-  const water = document.querySelector('input[name="waterType"]:checked').value;
-  $("review-machine").textContent = selectedMachine;
-  $("review-water").textContent = water === "purified" ? "Очищена вода" : "Мінералізована вода";
-  $("review-liters").textContent = `${liters} л`;
-  history.pushState({ view: "review", id: selectedMachine }, "", `/order/${selectedMachine}`);
-  showView("review-view");
+
+  if (selectedMachine !== "393") {
+    message.textContent = "Онлайн-оплата цього водомату поки недоступна.";
+    return;
+  }
+
+  const selectedWater = document.querySelector(
+    'input[name="waterType"]:checked'
+  );
+
+  if (!selectedWater) {
+    message.textContent = "Оберіть тип води.";
+    return;
+  }
+
+  const typeId = selectedWater.value === "purified" ? 1 : 2;
+
+  button.disabled = true;
+  message.textContent = "Створюємо рахунок для оплати…";
+
+  try {
+    const response = await fetch("/api/payments/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        machineId: selectedMachine,
+        typeId,
+        liters
+      })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.pageUrl) {
+      throw new Error(
+        result.error || "Не вдалося створити рахунок для оплати."
+      );
+    }
+
+    message.textContent = "Переходимо до оплати…";
+    window.location.assign(result.pageUrl);
+  } catch (error) {
+    message.textContent =
+      error.message || "Помилка з’єднання. Спробуйте ще раз.";
+    button.disabled = false;
+  }
 });
 $("edit-order").addEventListener("click", () => openMachine(selectedMachine, false));
 $("finish-demo").addEventListener("click", home);
+
 window.addEventListener("popstate", () => routeFromUrl(false));
 function routeFromUrl(updateUrl = true) {
   const path = window.location.pathname;
