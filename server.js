@@ -370,7 +370,7 @@ async function sim4Login() {
   return { base, jar };
 }
 
-async function sim4TopUp({ machineId, amountUah }) {
+async function sim4TopUpOnce({ machineId, amountUah }) {
   const allowedMachines = ['31613', '31994', '32027'];
 
   if (!allowedMachines.includes(String(machineId))) {
@@ -483,7 +483,17 @@ if (!resultHtml.includes('Кошти успішно зараховані на т
     `відповідь записана в лог SIM4 UNEXPECTED RESPONSE`
   );
 }
+// Черга поповнень SIM4: виконуємо лише одну операцію одночасно.
+let sim4Queue = Promise.resolve();
 
+function sim4TopUp(args) {
+  const job = sim4Queue.then(() => sim4TopUpOnce(args));
+
+  // Помилка одного поповнення не повинна блокувати наступні.
+  sim4Queue = job.catch(() => {});
+
+  return job;
+}
   return {
     ok: true,
     machineId: String(machineId),
