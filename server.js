@@ -826,7 +826,6 @@ app.post('/api/payments/create', async (req, res) => {
   "393":   { 1: 3.00, 2: 4.00 }
 };
 
-const machineId = String(req.body.machineId || "");
 const pricePerLiter = PRICES[machineId]?.[typeId];
 
 if (pricePerLiter == null) {
