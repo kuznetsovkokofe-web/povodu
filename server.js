@@ -469,11 +469,20 @@ async function sim4TopUp({ machineId, amountUah }) {
 
   const resultHtml = await resultPage.text();
 
-  if (!resultHtml.includes('Кошти успішно зараховані на термінал')) {
-    throw new Error(
-      'SIM4 не підтвердив успішне зарахування коштів'
-    );
-  }
+if (!resultHtml.includes('Кошти успішно зараховані на термінал')) {
+  console.error('SIM4 UNEXPECTED RESPONSE', {
+    machineId: String(machineId),
+    amountUah: Number(amountUah),
+    httpStatus: resultPage.status,
+    finalUrl: resultUrl.pathname,
+    responseHtml: resultHtml.slice(0, 5000)
+  });
+
+  throw new Error(
+    `SIM4 не підтвердив зарахування. HTTP ${resultPage.status}; ` +
+    `відповідь записана в лог SIM4 UNEXPECTED RESPONSE`
+  );
+}
 
   return {
     ok: true,
