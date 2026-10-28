@@ -467,38 +467,43 @@ async function sim4TopUpOnce({ machineId, amountUah }) {
     );
   }
 
+  
   const resultHtml = await resultPage.text();
 
-if (!resultHtml.includes('Кошти успішно зараховані на термінал')) {
+  if (!resultHtml.includes('Кошти успішно зараховані на термінал')) {
+    const diagnosticText = resultHtml
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<meta\b[^>]*>/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'")
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-  const diagnosticText = resultHtml
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<meta\b[^>]*>/gi, ' ')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
+    console.error('SIM4 UNEXPECTED RESPONSE', {
+      machineId: String(machineId),
+      amountUah: Number(amountUah),
+      httpStatus: resultPage.status,
+      finalUrl: resultUrl.pathname,
+      responseText: diagnosticText.slice(0, 5000)
+    });
 
-  console.error('SIM4 UNEXPECTED RESPONSE', {
+    throw new Error(
+      `SIM4 не підтвердив зарахування. HTTP ${resultPage.status}; ` +
+      'відповідь записана в лог SIM4 UNEXPECTED RESPONSE'
+    );
+  }
+
+  return {
+    ok: true,
     machineId: String(machineId),
-    amountUah: Number(amountUah),
-    httpStatus: resultPage.status,
-    finalUrl: resultUrl.pathname,
-    responseText: diagnosticText.slice(0, 5000)
-  
-  });
-
-  throw new Error(
-    `SIM4 не підтвердив зарахування. HTTP ${resultPage.status}; ` +
-    `відповідь записана в лог SIM4 UNEXPECTED RESPONSE`
-  );
-}
+    amountUah: Number(amountUah)
+  };
 }
 
 // Черга поповнень SIM4: одна операція за раз.
@@ -508,14 +513,7 @@ function sim4TopUp(args) {
   const job = sim4Queue.then(() => sim4TopUpOnce(args));
   sim4Queue = job.catch(() => {});
   return job;
-}
-
-
-  return {
-    ok: true,
-    machineId: String(machineId),
-    amountUah: Number(amountUah)
-  };
+ }
 }
 function adminAuth(req, res, next) {
   if (!ADMIN_PASSWORD) {
