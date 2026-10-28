@@ -171,6 +171,70 @@ async function waterCrmLogin() {
   return { jar, csrf: operatorCsrf };
 }
 
+async function waterCrmDispense({ liters, typeId }) {
+  if (!Number.isInteger(Number(liters)) || Number(liters) < 1) {
+    throw new Error('Некоректна кількість літрів');
+  }
+
+  if (![1, 2].includes(Number(typeId))) {
+    throw new Error('Некоректний тип води');
+  }
+
+  const base = 'https://water.net.ua';
+  const { jar, csrf } = await waterCrmLogin();
+
+  const response = await fetch(`${base}/places/set-remainder`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Cookie': waterCrmCookieHeader(jar),
+      'X-CSRF-Token': csrf,
+      'X-Requested-With': 'XMLHttpRequest',
+      'Referer': `${base}/places/operator-window`,
+      'Origin': base
+    },
+    body: new URLSearchParams({
+      '_csrf': csrf,
+      'device_id': '1193',
+      'value': String(Number(liters)),
+      'type_id': String(Number(typeId))
+    }).toString(),
+    signal: AbortSignal.timeout(15000)
+  });
+
+  waterCrmUpdateCookies(response.headers, jar);
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `WaterCRM command returned HTTP ${response.status}: ${responseText.slice(0, 300)}`
+    );
+  }
+
+  let result;
+
+  try {
+    result = JSON.parse(responseText);
+  } catch {
+    throw new Error(
+      `WaterCRM повернув не JSON: ${responseText.slice(0, 300)}`
+    );
+  }
+
+  if (
+    result.status !== 'success' &&
+    result.answer !== 'ok' &&
+    result.ok !== true
+  ) {
+    throw new Error(
+      `WaterCRM не підтвердив команду: ${responseText.slice(0, 300)}`
+    );
+  }
+
+  return result;
+}
+
 function adminAuth(req, res, next) {
   if (!ADMIN_PASSWORD) {
     return res.status(503).send(
