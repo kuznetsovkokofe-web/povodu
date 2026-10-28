@@ -499,8 +499,9 @@ if (!resultHtml.includes('Кошти успішно зараховані на т
     `відповідь записана в лог SIM4 UNEXPECTED RESPONSE`
   );
 }
-// Черга поповнень SIM4: виконуємо лише одну операцію одночасно.
+}
 
+// Черга поповнень SIM4: одна операція за раз.
 let sim4Queue = Promise.resolve();
 
 function sim4TopUp(args) {
@@ -508,6 +509,7 @@ function sim4TopUp(args) {
   sim4Queue = job.catch(() => {});
   return job;
 }
+
 
   return {
     ok: true,
