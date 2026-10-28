@@ -500,16 +500,15 @@ if (!resultHtml.includes('Кошти успішно зараховані на т
   );
 }
 // Черга поповнень SIM4: виконуємо лише одну операцію одночасно.
+
 let sim4Queue = Promise.resolve();
 
 function sim4TopUp(args) {
   const job = sim4Queue.then(() => sim4TopUpOnce(args));
-
-  // Помилка одного поповнення не повинна блокувати наступні.
   sim4Queue = job.catch(() => {});
-
   return job;
 }
+
   return {
     ok: true,
     machineId: String(machineId),
