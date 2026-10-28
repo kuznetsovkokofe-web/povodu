@@ -513,7 +513,6 @@ function sim4TopUp(args) {
   const job = sim4Queue.then(() => sim4TopUpOnce(args));
   sim4Queue = job.catch(() => {});
   return job;
- }
 }
 function adminAuth(req, res, next) {
   if (!ADMIN_PASSWORD) {
