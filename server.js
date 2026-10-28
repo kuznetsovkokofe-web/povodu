@@ -819,8 +819,23 @@ app.post('/api/payments/create', async (req, res) => {
     });
   }
 
-  const pricePerLiter = typeId === 1 ? 3 : 4;
-  const amount = liters * pricePerLiter * 100;
+  const PRICES = {
+  "31613": { 1: 2.50, 2: 3.00 },
+  "31994": { 1: 2.00, 2: 2.50 },
+  "32027": { 1: 2.00, 2: 2.50 },
+  "393":   { 1: 3.00, 2: 4.00 }
+};
+
+const machineId = String(req.body.machineId || "");
+const pricePerLiter = PRICES[machineId]?.[typeId];
+
+if (pricePerLiter == null) {
+  return res.status(400).json({
+    error: "Для цього водомата або типу води не налаштовано ціну."
+  });
+}
+
+const amount = Math.round(liters * pricePerLiter * 100);
   const paymentId = crypto.randomUUID();
 
   const waterName = typeId === 1
