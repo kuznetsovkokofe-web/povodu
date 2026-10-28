@@ -234,7 +234,253 @@ async function waterCrmDispense({ liters, typeId }) {
 
   return result;
 }
+// SIM4 / Gteh — окрема інтеграція.
+// Водомат 393 продовжує працювати через WaterCRM.
 
+function sim4CookieHeader(jar) {
+  return [...jar.entries()]
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+function sim4UpdateCookies(headers, jar) {
+  let cookies = [];
+
+  if (typeof headers.getSetCookie === 'function') {
+    cookies = headers.getSetCookie();
+  } else {
+    const value = headers.get('set-cookie');
+    if (value) cookies = [value];
+  }
+
+  for (const cookie of cookies) {
+    const pair = cookie.split(';', 1)[0];
+    const index = pair.indexOf('=');
+
+    if (index > 0) {
+      jar.set(
+        pair.slice(0, index).trim(),
+        pair.slice(index + 1).trim()
+      );
+    }
+  }
+}
+
+function sim4ExtractCsrf(html) {
+  const patterns = [
+    /<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']/i,
+    /<input[^>]+name=["']_token["'][^>]+value=["']([^"']+)["']/i,
+    /<input[^>]+value=["']([^"']+)["'][^>]+name=["']_token["']/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match) return match[1].replace(/&amp;/g, '&');
+  }
+
+  return null;
+}
+
+async function sim4Login() {
+  const username = process.env.SIM4_LOGIN;
+  const password = process.env.SIM4_PASSWORD;
+
+  if (!username || !password) {
+    throw new Error(
+      'Не налаштовано SIM4_LOGIN або SIM4_PASSWORD у Hostinger'
+    );
+  }
+
+  const base = 'https://sim4.gteh.com.ua/sim4';
+  const jar = new Map();
+
+  const loginPage = await fetch(`${base}/login`, {
+    redirect: 'manual',
+    signal: AbortSignal.timeout(15000)
+  });
+
+  sim4UpdateCookies(loginPage.headers, jar);
+
+  if (loginPage.status !== 200) {
+    throw new Error(`SIM4 сторінка входу: HTTP ${loginPage.status}`);
+  }
+
+  const loginHtml = await loginPage.text();
+  const csrf = sim4ExtractCsrf(loginHtml);
+
+  if (!csrf) {
+    throw new Error('Не знайдено CSRF-токен на сторінці входу SIM4');
+  }
+
+  const loginResponse = await fetch(`${base}/login`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Cookie: sim4CookieHeader(jar),
+      Referer: `${base}/login`,
+      Origin: 'https://sim4.gteh.com.ua'
+    },
+    body: new URLSearchParams({
+      _token: csrf,
+      login: username,
+      password
+    }).toString(),
+    signal: AbortSignal.timeout(15000)
+  });
+
+  sim4UpdateCookies(loginResponse.headers, jar);
+
+  const loginLocation = loginResponse.headers.get('location') || '';
+
+  if (
+    ![302, 303].includes(loginResponse.status) ||
+    /\/login(?:\?|$)/.test(loginLocation)
+  ) {
+    throw new Error(
+      `SIM4 не підтвердив вхід (HTTP ${loginResponse.status})`
+    );
+  }
+
+  const news = await fetch(`${base}/news`, {
+    redirect: 'manual',
+    headers: {
+      Cookie: sim4CookieHeader(jar),
+      Referer: `${base}/login`
+    },
+    signal: AbortSignal.timeout(15000)
+  });
+
+  sim4UpdateCookies(news.headers, jar);
+
+  if (news.status !== 200) {
+    throw new Error(`SIM4 перевірка сесії: HTTP ${news.status}`);
+  }
+
+  const newsHtml = await news.text();
+
+  if (
+    !newsHtml.includes('funds_replenishment') ||
+    /name=["']login["']/i.test(newsHtml)
+  ) {
+    throw new Error('SIM4 сесія не пройшла перевірку авторизації');
+  }
+
+  return { base, jar };
+}
+
+async function sim4TopUp({ machineId, amountUah }) {
+  const allowedMachines = ['31613', '31994', '32027'];
+
+  if (!allowedMachines.includes(String(machineId))) {
+    throw new Error(`Непідтримуваний SIM4 термінал: ${machineId}`);
+  }
+
+  if (!Number.isFinite(Number(amountUah)) || Number(amountUah) <= 0) {
+    throw new Error('Некоректна сума поповнення SIM4');
+  }
+
+  const { base, jar } = await sim4Login();
+
+  const page = await fetch(`${base}/funds_replenishment`, {
+    redirect: 'manual',
+    headers: {
+      Cookie: sim4CookieHeader(jar),
+      Referer: `${base}/news`
+    },
+    signal: AbortSignal.timeout(15000)
+  });
+
+  sim4UpdateCookies(page.headers, jar);
+
+  if (page.status !== 200) {
+    throw new Error(
+      `SIM4 сторінка поповнення: HTTP ${page.status}`
+    );
+  }
+
+  const html = await page.text();
+  const csrf = sim4ExtractCsrf(html);
+
+  if (!csrf) {
+    throw new Error(
+      'Не знайдено CSRF-токен на сторінці поповнення SIM4'
+    );
+  }
+
+  const response = await fetch(`${base}/funds_replenishment`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Cookie: sim4CookieHeader(jar),
+      Referer: `${base}/funds_replenishment`,
+      Origin: 'https://sim4.gteh.com.ua'
+    },
+    body: new URLSearchParams({
+      _token: csrf,
+      _method: 'POST',
+      object: '2291',
+      box: String(machineId),
+      amount: Number(amountUah).toFixed(2),
+      kop: '0',
+      submit: ''
+    }).toString(),
+    signal: AbortSignal.timeout(15000)
+  });
+
+  sim4UpdateCookies(response.headers, jar);
+
+  if (![302, 303].includes(response.status)) {
+    const responseText = await response.text();
+
+    throw new Error(
+      `SIM4 поповнення: HTTP ${response.status}: ` +
+      responseText.slice(0, 250)
+    );
+  }
+
+  const location =
+    response.headers.get('location') || '/funds_replenishment';
+
+  const resultUrl = new URL(location, `${base}/`);
+
+  if (resultUrl.origin !== 'https://sim4.gteh.com.ua') {
+    throw new Error('SIM4 повернув неочікуване перенаправлення');
+  }
+
+  const resultPage = await fetch(resultUrl, {
+    redirect: 'manual',
+    headers: {
+      Cookie: sim4CookieHeader(jar),
+      Referer: `${base}/funds_replenishment`
+    },
+    signal: AbortSignal.timeout(15000)
+  });
+
+  sim4UpdateCookies(resultPage.headers, jar);
+
+  if (resultPage.status !== 200) {
+    throw new Error(
+      `SIM4 перевірка результату: HTTP ${resultPage.status}`
+    );
+  }
+
+  const resultHtml = await resultPage.text();
+
+  if (!resultHtml.includes('Кошти успішно зараховані на термінал')) {
+    throw new Error(
+      'SIM4 не підтвердив успішне зарахування коштів'
+    );
+  }
+
+  return {
+    ok: true,
+    machineId: String(machineId),
+    amountUah: Number(amountUah)
+  };
+}
 function adminAuth(req, res, next) {
   if (!ADMIN_PASSWORD) {
     return res.status(503).send(
@@ -434,28 +680,49 @@ if (event.status === 'success') {
     [payment.id, payment.invoice_id]
   );
 
-  if (claim.affectedRows === 1) {
+    if (claim.affectedRows === 1) {
     try {
-      if (payment.machine_id !== '393') {
+      let result;
+
+      const machineId = String(payment.machine_id);
+
+      if (machineId === '393') {
+        // Старий водомат: WaterCRM не змінюємо.
+        result = await waterCrmDispense({
+          liters: payment.liters,
+          typeId: payment.type_id
+        });
+      } else if (
+        ['31613', '31994', '32027'].includes(machineId)
+      ) {
+        // Інші водомати: поповнення через SIM4.
+        result = await sim4TopUp({
+          machineId,
+          amountUah: Number(payment.amount) / 100
+        });
+      } else {
         throw new Error(
-          `Непідтримуваний водомат: ${payment.machine_id}`
+          `Непідтримуваний водомат: ${machineId}`
         );
       }
 
-      const result = await waterCrmDispense({
-        liters: payment.liters,
-        typeId: payment.type_id
-      });
-
       await pool.execute(
         `UPDATE water_payments
-         SET dispense_status = 'command_sent'
-         WHERE id = ? AND dispense_status = 'processing'`,
-        [payment.id]
+         SET dispense_status = 'command_sent',
+             dispense_message = ?
+         WHERE id = ?
+           AND dispense_status = 'processing'`,
+        [
+          machineId === '393'
+            ? 'Команду передано через WaterCRM'
+            : 'SIM4 підтвердив зарахування коштів на термінал',
+          payment.id
+        ]
       );
 
-      console.log('WATERCRM COMMAND ACCEPTED', {
+      console.log('WATER DISPENSING REQUEST ACCEPTED', {
         paymentId: payment.id,
+        machineId,
         liters: payment.liters,
         typeId: payment.type_id,
         result
@@ -463,13 +730,19 @@ if (event.status === 'success') {
     } catch (dispenseError) {
       await pool.execute(
         `UPDATE water_payments
-         SET dispense_status = 'failed'
-         WHERE id = ? AND dispense_status = 'processing'`,
-        [payment.id]
+         SET dispense_status = 'failed',
+             dispense_message = ?
+         WHERE id = ?
+           AND dispense_status = 'processing'`,
+        [
+          String(dispenseError.message || 'Невідома помилка').slice(0, 2000),
+          payment.id
+        ]
       );
 
-      console.error('WATERCRM DISPENSE FAILED', {
+      console.error('WATER DISPENSING FAILED', {
         paymentId: payment.id,
+        machineId: String(payment.machine_id),
         error: dispenseError.message
       });
     }
@@ -513,6 +786,15 @@ app.post('/api/payments/create', async (req, res) => {
     });
   }
 
+  const machineId = String(req.body.machineId || '');
+  const allowedMachines = ['31613', '31994', '32027', '393'];
+
+  if (!allowedMachines.includes(machineId)) {
+    return res.status(400).json({
+      error: 'Оберіть коректний водомат.'
+    });
+  }
+
   const typeId = Number(req.body.typeId);
   const liters = Number(req.body.liters);
 
@@ -522,7 +804,6 @@ app.post('/api/payments/create', async (req, res) => {
     });
   }
 
-  // Цілі літри; не дозволяємо випадкові чи надмірні суми.
   if (!Number.isInteger(liters) || liters < 1 || liters > 100) {
     return res.status(400).json({
       error: 'Кількість має бути від 1 до 100 літрів.'
@@ -532,17 +813,18 @@ app.post('/api/payments/create', async (req, res) => {
   const pricePerLiter = typeId === 1 ? 3 : 4;
   const amount = liters * pricePerLiter * 100;
   const paymentId = crypto.randomUUID();
+
   const waterName = typeId === 1
     ? 'Очищена вода'
     : 'Мінералізована вода';
 
   try {
-    // Спершу реєструємо замовлення в БД.
+    // Реєструємо замовлення для вибраного водомата.
     await pool.execute(
       `INSERT INTO water_payments
         (id, created_at, machine_id, type_id, liters, amount, status)
-       VALUES (?, UTC_TIMESTAMP(3), '393', ?, ?, ?, 'creating')`,
-      [paymentId, typeId, liters, amount]
+       VALUES (?, UTC_TIMESTAMP(3), ?, ?, ?, ?, 'creating')`,
+      [paymentId, machineId, typeId, liters, amount]
     );
 
     const monoResponse = await fetch(
@@ -559,7 +841,8 @@ app.post('/api/payments/create', async (req, res) => {
           webHookUrl: 'https://povodu.online/api/payments/webhook',
           merchantPaymInfo: {
             reference: paymentId,
-            destination: `${waterName}, ${liters} л, водомат 393`,
+            destination:
+              `${waterName}, ${liters} л, водомат ${machineId}`,
             comment: `Замовлення ${paymentId}`
           }
         }),
@@ -581,7 +864,8 @@ app.post('/api/payments/create', async (req, res) => {
       );
 
       await pool.execute(
-        `UPDATE water_payments SET status = 'create_failed'
+        `UPDATE water_payments
+         SET status = 'create_failed'
          WHERE id = ? AND status = 'creating'`,
         [paymentId]
       );
@@ -601,6 +885,7 @@ app.post('/api/payments/create', async (req, res) => {
     return res.status(201).json({
       ok: true,
       paymentId,
+      machineId,
       amount: amount / 100,
       currency: 'UAH',
       pageUrl: monoData.pageUrl
@@ -609,7 +894,8 @@ app.post('/api/payments/create', async (req, res) => {
     console.error('Payment creation failed:', error.message);
 
     await pool.execute(
-      `UPDATE water_payments SET status = 'create_failed'
+      `UPDATE water_payments
+       SET status = 'create_failed'
        WHERE id = ? AND status = 'creating'`,
       [paymentId]
     ).catch(() => {});
