@@ -1,0 +1,41 @@
+
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0877bd">
+  <title>Контакти — ПоВоду</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="ПоВоду — головна">
+      <span>ПоВоду</span>
+    </a>
+    <span class="tagline">Джерело біля дому</span>
+  </header>
+
+  <main class="shell">
+    <section class="panel">
+      <a class="back-link" href="/">← На головну</a>
+      <h1>Контакти</h1>
+
+      <!-- ПОЧАТОК ТЕКСТУ КОНТАКТІВ -->
+      <div class="info-content">
+        <!-- СЮДИ ВСТАВИШ СВІЙ ТЕКСТ -->
+      </div>
+      <!-- КІНЕЦЬ ТЕКСТУ КОНТАКТІВ -->
+    </section>
+  </main>
+
+  <footer>
+    <span>© <span id="year"></span> ПоВоду</span>
+    <span>Джерело біля дому</span>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
