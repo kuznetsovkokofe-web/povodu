@@ -887,11 +887,22 @@ const amount = Math.round(liters * pricePerLiter * 100);
           ccy: 980,
           webHookUrl: 'https://povodu.online/api/payments/webhook',
           merchantPaymInfo: {
-            reference: paymentId,
-            destination:
-              `${waterName}, ${liters} л, водомат ${machineId}`,
-            comment: `Замовлення ${paymentId}`
-          }
+  reference: paymentId,
+  destination:
+    `${waterName}, ${liters} л, водомат ${machineId}`,
+  comment: `Замовлення ${paymentId}`,
+  basketOrder: [
+    {
+      name: waterName,
+      qty: liters,
+      sum: Math.round(pricePerLiter * 100),
+      total: amount,
+      unit: 'л',
+      code: `WATER-${typeId}`,
+      tax: []
+    }
+  ]
+}
         }),
         signal: AbortSignal.timeout(15000)
       }
