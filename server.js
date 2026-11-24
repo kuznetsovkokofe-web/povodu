@@ -6,7 +6,7 @@ const mysql = require('mysql2/promise');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const MACHINES = ['31613', '31994', '32027', '393'];
+const MACHINES = ['31613', '31994', '32027', '393', '32062'];
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 app.disable('x-powered-by');
@@ -371,7 +371,7 @@ async function sim4Login() {
 }
 
 async function sim4TopUpOnce({ machineId, amountUah }) {
-  const allowedMachines = ['31613', '31994', '32027'];
+  const allowedMachines = ['31613', '31994', '32027', '32062'];
 
   if (!allowedMachines.includes(String(machineId))) {
     throw new Error(`Непідтримуваний SIM4 термінал: ${machineId}`);
@@ -726,7 +726,7 @@ if (event.status === 'success') {
           typeId: payment.type_id
         });
       } else if (
-        ['31613', '31994', '32027'].includes(machineId)
+        ['31613', '31994', '32027', '32062'].includes(machineId)
       ) {
         // Інші водомати: поповнення через SIM4.
         result = await sim4TopUp({
@@ -820,7 +820,7 @@ app.post('/api/payments/create', async (req, res) => {
   }
 
   const machineId = String(req.body.machineId || '');
-  const allowedMachines = ['31613', '31994', '32027', '393'];
+  const allowedMachines = ['31613', '31994', '32027', '393', '32062'];
 
   if (!allowedMachines.includes(machineId)) {
     return res.status(400).json({
@@ -847,7 +847,8 @@ app.post('/api/payments/create', async (req, res) => {
   "31613": { 1: 2.50, 2: 3.00 },
   "31994": { 1: 2.00, 2: 2.50 },
   "32027": { 1: 2.00, 2: 2.50 },
-  "393":   { 1: 3.00, 2: 4.00 }
+  "393":   { 1: 3.00, 2: 4.00 },
+  "32062": { 1: 2.00, 2: 2.50 }
 };
 
 const pricePerLiter = PRICES[machineId]?.[typeId];
