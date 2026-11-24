@@ -1,4 +1,4 @@
-const MACHINE_IDS = ["31613", "31994", "32027", "393"];
+const MACHINE_IDS = ["31613", "31994", "32027", "393", "32062"];
 const views = [
   "home-view",
   "machine-list-view",
